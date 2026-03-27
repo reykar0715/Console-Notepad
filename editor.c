@@ -16,6 +16,7 @@
 #define UNDO_TYPE_INSERT 1 //undo karakter ekleme işlemleri için
 #define UNDO_TYPE_DELETE 2 //undo silme işlemleri için
 
+int utf8_char_length_backward(const char *data, int index);
 void editor_prompt(Editor *ed, const char *prompt, char *buf, int buf_len);
 void editor_search(Editor *ed);
 static void editor_delete_selection(Editor *ed);
@@ -267,14 +268,25 @@ static void editor_copy_selection(Editor *ed) //CTRL + C, kopyalama
     }
 }
 
-int utf8_char_length_backward(const char *data, int index) //türkçe karakter için karakter byte kontrolü
+int utf8_char_length_forward(const char *data, int index) //türkçe karakterler için kaç byte olduğunu hesapla
+{
+    unsigned char c = data[index];
+
+    if ((c & 0x80) == 0) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+
+    return 1;
+}
+
+int utf8_char_length_backward(const char *data, int index) //tr krktr byte esaplama
 {
     if (index <= 0) return 1;
 
     int i = index - 1;
 
-    // UTF-8 uzunluk kontrolü
-    while (i > 0 && (data[i] & 0xC0) == 0x80)
+    while (i > 0 && (data[i] & 0xC0) == 0x80) //byte sayma
         i--;
 
     return index - i;
@@ -509,35 +521,26 @@ void editor_render(Editor *ed) //bufferdaki verileri düzenleyip (renk vs) ekran
     }
 
     for (int i = 0; i < ed->buffer.length; i++) {
-        char c = ed->buffer.data[i];
-
+        int char_len = utf8_char_length_forward(ed->buffer.data, i);
+    
         if (ed->selection_active && i >= sel_start && i < sel_end) {
-            printf("\x1b[43m"); //sarı
-            putchar(c);
-            printf("\x1b[0m");
-            continue;
-        }
-
-        if (ed->search_len > 0 && i <= ed->buffer.length - ed->search_len && strncmp(&ed->buffer.data[i], ed->search_query, ed->search_len) == 0)
-        {
-            printf("\x1b[44m"); // mavi arka plan
-
-            for (int j = 0; j < ed->search_len; j++) {
+            printf("\x1b[43m");
+            for (int j = 0; j < char_len; j++) {
                 putchar(ed->buffer.data[i + j]);
             }
-
             printf("\x1b[0m");
-
-            i += (ed->search_len - 1);
-            continue;
+        } else {
+            for (int j = 0; j < char_len; j++) {
+                putchar(ed->buffer.data[i + j]);
+            }
         }
-
-        putchar(c);
-
-        if (c == '\n') {
+    
+        if (ed->buffer.data[i] == '\n') {
             lineNum++;
             printf("%3d | ", lineNum);
         }
+    
+        i += char_len - 1;
     }
 
     gotoxy(ed->cursor.x, ed->cursor.y);
