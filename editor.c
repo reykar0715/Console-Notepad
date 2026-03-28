@@ -161,8 +161,8 @@ void editor_search(Editor *ed) //CTRL + F ve + G, arama
 
     //ilk eşleşmeyi bulup imleci oraya taşıyoruz
     char *match = strstr(ed->buffer.data, ed->search_query);
-    if (match) {
-        ed->cursor.index = (int)(match - ed->buffer.data);
+    if (match) { //imleci kelimenin sonuna getiriyoruz
+        ed->cursor.index = (int)(match - ed->buffer.data) + ed->search_len;
         cursor_update_from_index(&ed->buffer, &ed->cursor);
     }
 }
@@ -188,7 +188,7 @@ void editor_find_all_matches(Editor *ed) //tüm eşleşmeleri bulabilmek için
 
     if (ed->search_count > 0) {
         ed->search_current = 0;
-        ed->cursor.index = ed->search_results[0];
+        ed->cursor.index = ed->search_results[0] + ed->search_len;
         cursor_update_from_index(&ed->buffer, &ed->cursor);
     }
 }
@@ -216,7 +216,7 @@ void editor_search_next(Editor *ed, int direction) //CTRL + G bulunan eşleşmel
     if (ed->search_current >= ed->search_count) ed->search_current = 0; //sonuncudan sonra baştakine gönderir
     if (ed->search_current < 0) ed->search_current = ed->search_count - 1; //ilkteyken öncekine basınca sonuncuya gönderir
 
-    ed->cursor.index = ed->search_results[ed->search_current];
+    ed->cursor.index = ed->search_results[ed->search_current] + ed->search_len;
     cursor_update_from_index(&ed->buffer, &ed->cursor);
 }
 
@@ -391,7 +391,7 @@ static void editor_delete(Editor *ed) //silme
     ed->modified = 1;
 }
 
-static void editor_delete_word_left(Editor *ed) //SHIFT BACKSPACE, kelime silme
+static void editor_delete_word_left(Editor *ed) //CTRL BACKSPACE, kelime silme
 {
     if (ed->cursor.index <= 0)
         return;
@@ -520,19 +520,43 @@ void editor_render(Editor *ed) //bufferdaki verileri düzenleyip (renk vs) ekran
         sel_end = tmp;
     }
 
-    for (int i = 0; i < ed->buffer.length; i++) {
+    for (int i = 0; i < ed->buffer.length; i++) { //CTRL + F için mavi arka plan desteği
+
         int char_len = utf8_char_length_forward(ed->buffer.data, i);
     
-        if (ed->selection_active && i >= sel_start && i < sel_end) {
-            printf("\x1b[43m");
-            for (int j = 0; j < char_len; j++) {
+        int isSelection = (ed->selection_active && i >= sel_start && i < sel_end);
+        int isSearchMatch = 0;
+    
+        if (ed->search_len > 0 && i + ed->search_len <= ed->buffer.length) {
+            if (strncmp(&ed->buffer.data[i], ed->search_query, ed->search_len) == 0) {
+                isSearchMatch = 1;
+            }
+        }
+    
+        if (isSearchMatch && !isSelection)
+        {
+            printf("\x1b[44m");
+    
+            for (int j = 0; j < ed->search_len; j++) {
                 putchar(ed->buffer.data[i + j]);
             }
+    
             printf("\x1b[0m");
-        } else {
-            for (int j = 0; j < char_len; j++) {
-                putchar(ed->buffer.data[i + j]);
-            }
+    
+            i += ed->search_len - 1;
+            continue;
+        }
+    
+        if (isSelection) {
+            printf("\x1b[43m");
+        }
+    
+        for (int j = 0; j < char_len; j++) {
+            putchar(ed->buffer.data[i + j]);
+        }
+    
+        if (isSelection) {
+            printf("\x1b[0m");
         }
     
         if (ed->buffer.data[i] == '\n') {
@@ -668,7 +692,6 @@ int editor_process_input(Editor *ed, int ch, int *running) //normal karakter, k�
                 return 1;
             
             case 127: //CTRL + Backspace
-                editor_delete_word_left(ed);
                 if (ed->selection_active) {
                     editor_delete_selection(ed);
                 } else {
@@ -680,9 +703,10 @@ int editor_process_input(Editor *ed, int ch, int *running) //normal karakter, k�
     }
 
     if (ch == 27) { //ESC
-        if (ed->search_count > 0) {
+        if (ed->search_len > 0) {
             ed->search_len = 0;
             ed->search_count = 0;
+            ed->search_query[0] = '\0';
             return 1;
         }
     
